@@ -1,0 +1,278 @@
+"""Write metadata to files using EXIF tools and manage file mtime."""
+
+import datetime
+import logging
+import os
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Any, Optional, cast
+
+import piexif  # type: ignore[import-untyped]
+from mutagen.mp4 import MP4  # type: ignore[import-untyped]
+from piexif import helper as piexif_helper  # type: ignore[import-untyped]
+
+from .metadata import Metadata
+
+logger = logging.getLogger("gphotosmerger")
+
+
+def ensure_exiftool() -> str:
+    exe = shutil.which("exiftool")
+    if exe is None:
+        raise FileNotFoundError(
+            "exiftool not found in PATH; please install exiftool and ensure it's on PATH"
+        )
+    return exe
+
+
+def format_timestamp_for_exif(timestamp_str: str) -> Optional[tuple[str, int]]:
+    """Convert epoch-seconds string to exif datetime string and epoch int.
+
+    Returns (exif_formatted_str, epoch_seconds) or None on failure.
+    """
+    try:
+        epoch_seconds = int(timestamp_str)
+        dt = datetime.datetime.fromtimestamp(epoch_seconds, tz=datetime.timezone.utc)
+        exif_dt = dt.strftime("%Y:%m:%d %H:%M:%S")
+        return exif_dt, epoch_seconds
+    except (ValueError, OSError, OverflowError):
+        return None
+
+
+def _empty_exif_dict() -> dict[str, Any]:
+    return {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}
+
+
+def _deg_to_rational(
+    deg: float,
+) -> tuple[tuple[int, int], tuple[int, int], tuple[int, int]]:
+    abs_deg = abs(deg)
+    degrees = int(abs_deg)
+    minutes_float = (abs_deg - degrees) * 60.0
+    minutes = int(minutes_float)
+    seconds = (minutes_float - minutes) * 60.0
+    return ((degrees, 1), (minutes, 1), (int(seconds * 10000), 10000))
+
+
+def _write_metadata_piexif(
+    photo_path: Path, metadata: Metadata, preserve_mtime: bool
+) -> None:
+    original_times = None
+    if preserve_mtime:
+        st = photo_path.stat()
+        original_times = (st.st_atime, st.st_mtime)
+
+    try:
+        exif_dict = cast(dict[str, Any], piexif.load(str(photo_path)))  # type: ignore[reportUnknownMemberType]
+    except Exception:
+        exif_dict = _empty_exif_dict()
+
+    # date/time
+    epoch_seconds: Optional[int] = None
+    has_time = False
+    time_section = metadata.get("photoTakenTime")
+    if isinstance(time_section, dict):
+        ts = time_section.get("timestamp")
+        if ts:
+            res = format_timestamp_for_exif(ts)
+            if res:
+                exif_dt, epoch_seconds = res
+                exif_dict["0th"][piexif.ImageIFD.DateTime] = exif_dt
+                exif_dict["Exif"][piexif.ExifIFD.DateTimeOriginal] = exif_dt
+                exif_dict["Exif"][piexif.ExifIFD.DateTimeDigitized] = exif_dt
+                has_time = True
+
+    # GPS
+    geo_section = metadata.get("geoData")
+    has_gps = False
+    if isinstance(geo_section, dict):
+        lat = geo_section.get("latitude")
+        lon = geo_section.get("longitude")
+        if lat is not None and lon is not None:
+            exif_dict["GPS"][piexif.GPSIFD.GPSLatitudeRef] = "N" if lat >= 0 else "S"
+            exif_dict["GPS"][piexif.GPSIFD.GPSLatitude] = _deg_to_rational(float(lat))
+            exif_dict["GPS"][piexif.GPSIFD.GPSLongitudeRef] = "E" if lon >= 0 else "W"
+            exif_dict["GPS"][piexif.GPSIFD.GPSLongitude] = _deg_to_rational(float(lon))
+            has_gps = True
+
+    # description
+    desc = metadata.get("description")
+    has_desc = False
+    if desc:
+        exif_dict["0th"][piexif.ImageIFD.ImageDescription] = desc
+        if piexif_helper is not None:
+            exif_dict["Exif"][piexif.ExifIFD.UserComment] = (
+                piexif_helper.UserComment.dump(desc, encoding="unicode")
+            )
+        has_desc = True
+
+    logger.info(
+        "Writing metadata (piexif)",
+        extra={
+            "photo_path": str(photo_path),
+            "has_time": has_time,
+            "has_gps": has_gps,
+            "has_description": has_desc,
+            "preserve_mtime": preserve_mtime,
+        },
+    )
+
+    exif_bytes = cast(bytes, piexif.dump(exif_dict))  # type: ignore[reportUnknownMemberType]
+    piexif.insert(exif_bytes, str(photo_path))
+
+    if preserve_mtime and original_times is not None:
+        os.utime(photo_path, original_times)
+    elif epoch_seconds is not None:
+        os.utime(photo_path, (float(epoch_seconds), float(epoch_seconds)))
+
+    logger.info(
+        "Metadata written (piexif)",
+        extra={"photo_path": str(photo_path)},
+    )
+
+
+def _write_metadata_exiftool(
+    photo_path: Path, metadata: Metadata, preserve_mtime: bool
+) -> None:
+    exiftool_exe = ensure_exiftool()
+    command_args = [exiftool_exe, "-overwrite_original"]
+
+    # date/time
+    epoch_seconds: Optional[int] = None
+    has_time = False
+    time_section = metadata.get("photoTakenTime")
+    if isinstance(time_section, dict):
+        ts = time_section.get("timestamp")
+        if ts:
+            res = format_timestamp_for_exif(ts)
+            if res:
+                exif_dt, epoch_seconds = res
+                command_args.append(f"-DateTimeOriginal={exif_dt}")
+                has_time = True
+
+    # GPS
+    geo_section = metadata.get("geoData")
+    has_gps = False
+    if isinstance(geo_section, dict):
+        lat = geo_section.get("latitude")
+        lon = geo_section.get("longitude")
+        if lat is not None and lon is not None:
+            command_args.append(f"-GPSLatitude={lat}")
+            command_args.append(f"-GPSLongitude={lon}")
+            has_gps = True
+
+    # description
+    desc = metadata.get("description")
+    has_desc = False
+    if desc:
+        command_args.append(f"-ImageDescription={desc}")
+        command_args.append(f"-XMP-dc:Description={desc}")
+        has_desc = True
+
+    # preserve mtime via -P when requested
+    if preserve_mtime:
+        command_args.insert(1, "-P")
+
+    command_args.append(str(photo_path))
+
+    logger.info(
+        "Writing metadata (exiftool)",
+        extra={
+            "photo_path": str(photo_path),
+            "has_time": has_time,
+            "has_gps": has_gps,
+            "has_description": has_desc,
+            "preserve_mtime": preserve_mtime,
+        },
+    )
+
+    try:
+        subprocess.run(
+            command_args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=True
+        )
+    except subprocess.CalledProcessError as cpe:
+        stderr = cpe.stderr.decode(errors="replace") if cpe.stderr else ""
+        raise RuntimeError(f"exiftool failed: {stderr}") from cpe
+
+    # if we have an epoch timestamp and preserve_mtime is False, set mtime ourselves
+    if epoch_seconds is not None and not preserve_mtime:
+        try:
+            os.utime(photo_path, (float(epoch_seconds), float(epoch_seconds)))
+        except Exception as ut_err:
+            raise RuntimeError(f"Failed to set file mtime: {ut_err}") from ut_err
+
+    logger.info(
+        "Metadata written (exiftool)",
+        extra={"photo_path": str(photo_path)},
+    )
+
+
+def _write_metadata_mutagen(
+    photo_path: Path, metadata: Metadata, preserve_mtime: bool
+) -> None:
+    original_times = None
+    if preserve_mtime:
+        st = photo_path.stat()
+        original_times = (st.st_atime, st.st_mtime)
+
+    mp4 = cast(Any, MP4(str(photo_path)))
+
+    # date/time
+    epoch_seconds: Optional[int] = None
+    has_time = False
+    time_section = metadata.get("photoTakenTime")
+    if isinstance(time_section, dict):
+        ts = time_section.get("timestamp")
+        if ts:
+            res = format_timestamp_for_exif(ts)
+            if res:
+                exif_dt, epoch_seconds = res
+                mp4["\xa9day"] = exif_dt
+                has_time = True
+
+    # description
+    desc = metadata.get("description")
+    has_desc = False
+    if desc:
+        mp4["\xa9cmt"] = desc
+        has_desc = True
+
+    logger.info(
+        "Writing metadata (mutagen/MP4)",
+        extra={
+            "photo_path": str(photo_path),
+            "has_time": has_time,
+            "has_description": has_desc,
+            "preserve_mtime": preserve_mtime,
+        },
+    )
+
+    mp4.save()
+
+    if preserve_mtime and original_times is not None:
+        os.utime(photo_path, original_times)
+    elif epoch_seconds is not None:
+        os.utime(photo_path, (float(epoch_seconds), float(epoch_seconds)))
+
+    logger.info(
+        "Metadata written (mutagen/MP4)",
+        extra={"photo_path": str(photo_path)},
+    )
+
+
+def write_metadata(
+    photo_path: Path, metadata: Metadata, preserve_mtime: bool = True
+) -> None:
+    """Write metadata to file based on type.
+
+    Uses piexif for JPEG, mutagen for MP4, and exiftool for others.
+    """
+    suffix = photo_path.suffix.lower()
+    match suffix:
+        case ".jpg" | ".jpeg":
+            _write_metadata_piexif(photo_path, metadata, preserve_mtime)
+        case ".mp4":
+            _write_metadata_mutagen(photo_path, metadata, preserve_mtime)
+        case _:
+            _write_metadata_exiftool(photo_path, metadata, preserve_mtime)
