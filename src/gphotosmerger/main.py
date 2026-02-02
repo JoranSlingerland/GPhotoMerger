@@ -50,6 +50,11 @@ def _parse_args() -> argparse.Namespace:
         default=4,
         help="Number of parallel workers for processing (default: 4)",
     )
+    parser.add_argument(
+        "--move-files",
+        action="store_true",
+        help="Move files instead of copying (faster, but removes originals)",
+    )
     return parser.parse_args()
 
 
@@ -69,6 +74,7 @@ def main() -> None:
     print(f"Export directory:            {args.export_dir}")
     print(f"Log file:                    {args.log_file}")
     print(f"Max workers:                 {args.max_workers}")
+    print(f"Move files:                  {args.move_files}")
     print("=" * 60)
     print()
 
@@ -79,13 +85,18 @@ def main() -> None:
             "export_dir": str(args.export_dir),
             "log_file": str(args.log_file),
             "max_workers": args.max_workers,
+            "move_files": args.move_files,
         },
     )
 
     args.export_dir.mkdir(parents=True, exist_ok=True)
 
     stats = process_takeout(
-        args.source, args.export_dir, logger, max_workers=args.max_workers
+        args.source,
+        args.export_dir,
+        logger,
+        max_workers=args.max_workers,
+        move_files=args.move_files,
     )
 
     print()

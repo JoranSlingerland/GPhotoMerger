@@ -6,7 +6,7 @@ from typing import NamedTuple
 
 from tqdm import tqdm
 
-from .exif_writer import write_metadata as exif_write
+from .exif_writer import write_metadata
 from .metadata import find_json, load_metadata_from_file
 
 
@@ -26,6 +26,7 @@ def _process_photo(
     root_path: Path,
     export_dir: Path,
     logger: logging.Logger,
+    move_files: bool,
 ) -> tuple[bool, bool, str]:
     """Process a single photo. Returns (success, has_metadata, error_msg)."""
     find_result = find_json(photo_path)
@@ -38,7 +39,10 @@ def _process_photo(
 
     dest_photo = export_dir / relative_path
     dest_photo.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(photo_path, dest_photo)
+    if move_files:
+        shutil.move(str(photo_path), str(dest_photo))
+    else:
+        shutil.copy2(photo_path, dest_photo)
 
     target_photo_path = dest_photo
 
@@ -81,7 +85,15 @@ def _process_photo(
         return (True, False, "")
 
     try:
-        exif_write(target_photo_path, metadata)
+        final_photo_path = write_metadata(target_photo_path, metadata)
+        if final_photo_path != target_photo_path:
+            logger.info(
+                "Photo path changed after processing",
+                extra={
+                    "photo_path": str(target_photo_path),
+                    "final_photo_path": str(final_photo_path),
+                },
+            )
         return (True, True, "")
     except Exception as e:
         logger.exception(
@@ -100,10 +112,15 @@ def process_takeout(
     logger: logging.Logger,
     supported_ext: set[str] = SUPPORTED_EXT,
     max_workers: int = 4,
+    move_files: bool = False,
 ) -> ProcessingStats:
     logger.info(
         "Starting processing takeout root",
-        extra={"root_path": str(root_path), "max_workers": max_workers},
+        extra={
+            "root_path": str(root_path),
+            "max_workers": max_workers,
+            "move_files": move_files,
+        },
     )
     all_files = list(root_path.rglob("*"))
     photos: list[Path] = []
@@ -131,27 +148,33 @@ def process_takeout(
     photos_failed = 0
 
     # Process photos in parallel using thread pool
-    # Limit to available photos if fewer than max_workers
-    actual_workers = min(max_workers, len(photos))
-    with ThreadPoolExecutor(max_workers=actual_workers) as executor:
-        futures = {
-            executor.submit(
-                _process_photo, photo_path, root_path, export_dir, logger
-            ): photo_path
-            for photo_path in photos
-        }
+    if photos:
+        # Limit to available photos if fewer than max_workers
+        actual_workers = min(max_workers, len(photos))
+        with ThreadPoolExecutor(max_workers=actual_workers) as executor:
+            futures = {
+                executor.submit(
+                    _process_photo,
+                    photo_path,
+                    root_path,
+                    export_dir,
+                    logger,
+                    move_files,
+                ): photo_path
+                for photo_path in photos
+            }
 
-        for future in tqdm(
-            as_completed(futures),
-            total=len(photos),
-            desc="Processing photos",
-        ):
-            success, has_metadata, _ = future.result()
-            if success:
-                if has_metadata:
-                    photos_with_metadata += 1
-            else:
-                photos_failed += 1
+            for future in tqdm(
+                as_completed(futures),
+                total=len(photos),
+                desc="Processing photos",
+            ):
+                success, has_metadata, _ = future.result()
+                if success:
+                    if has_metadata:
+                        photos_with_metadata += 1
+                else:
+                    photos_failed += 1
 
     logger.info(
         "Completed processing takeout root",

@@ -400,8 +400,8 @@ def _write_metadata_mutagen(
 
 def write_metadata(
     photo_path: Path, metadata: Metadata, preserve_mtime: bool = True
-) -> None:
-    """Write metadata to file based on type.
+) -> Path:
+    """Write metadata to file based on type and return the final path.
 
     Uses piexif for JPEG, PIL for PNG, mutagen for MP4/MOV, and exiftool for HEIC.
     BMP files are converted to PNG before writing metadata.
@@ -422,3 +422,5 @@ def write_metadata(
             _write_metadata_png(photo_path, metadata, preserve_mtime)
         case _:
             _write_metadata_exiftool(photo_path, metadata, preserve_mtime)
+
+    return photo_path
