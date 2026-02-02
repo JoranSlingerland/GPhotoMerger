@@ -118,8 +118,18 @@ def _write_metadata_piexif(
         },
     )
 
-    exif_bytes = cast(bytes, piexif.dump(exif_dict))  # type: ignore[reportUnknownMemberType]
-    piexif.insert(exif_bytes, str(photo_path))
+    try:
+        exif_bytes = cast(bytes, piexif.dump(exif_dict))  # type: ignore[reportUnknownMemberType]
+        piexif.insert(exif_bytes, str(photo_path))
+    except (ValueError, TypeError) as e:
+        # piexif can fail with invalid EXIF data types
+        # Fall back to exiftool in this case
+        logger.debug(
+            "piexif failed, falling back to exiftool",
+            extra={"photo_path": str(photo_path), "error": str(e)},
+        )
+        _write_metadata_exiftool(photo_path, metadata, preserve_mtime)
+        return
 
     if preserve_mtime and original_times is not None:
         os.utime(photo_path, original_times)
@@ -136,7 +146,7 @@ def _write_metadata_exiftool(
     photo_path: Path, metadata: Metadata, preserve_mtime: bool
 ) -> None:
     exiftool_exe = ensure_exiftool()
-    command_args = [exiftool_exe, "-overwrite_original"]
+    command_args = [exiftool_exe, "-m", "-overwrite_original"]
 
     # date/time
     epoch_seconds: Optional[int] = None
@@ -187,13 +197,28 @@ def _write_metadata_exiftool(
         },
     )
 
-    try:
-        subprocess.run(
-            command_args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=True
-        )
-    except subprocess.CalledProcessError as cpe:
-        stderr = cpe.stderr.decode(errors="replace") if cpe.stderr else ""
-        raise RuntimeError(f"exiftool failed: {stderr}") from cpe
+    result = subprocess.run(
+        command_args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+    )
+
+    stderr = result.stderr.decode(errors="replace") if result.stderr else ""
+
+    # exiftool returns exit code 1 for minor issues but also for real errors
+    # Only ignore if we recognize it as a minor/known issue
+    if result.returncode != 0:
+        # These are minor warnings we can safely ignore
+        minor_warnings = [
+            "looks more like a",  # Format mismatch warnings
+            "IFD0 pointer references",  # Corrupted EXIF
+            "[minor]",  # Explicitly marked as minor
+        ]
+
+        is_minor_warning = any(warning in stderr for warning in minor_warnings)
+
+        if not is_minor_warning:
+            raise RuntimeError(
+                f"exiftool failed with exit code {result.returncode}: {stderr}"
+            )
 
     # if we have an epoch timestamp and preserve_mtime is False, set mtime ourselves
     if epoch_seconds is not None and not preserve_mtime:
