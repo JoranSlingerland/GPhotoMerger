@@ -54,6 +54,68 @@ class JSONFormatter(logging.Formatter):
         return _json.dumps(payload, ensure_ascii=False)
 
 
+class ConsoleFormatter(logging.Formatter):
+    """Human-readable formatter for console output."""
+
+    LEVEL_COLORS = {
+        "DEBUG": "\033[36m",  # Cyan
+        "INFO": "\033[32m",  # Green
+        "WARNING": "\033[33m",  # Yellow
+        "ERROR": "\033[31m",  # Red
+        "CRITICAL": "\033[35m",  # Magenta
+    }
+    RESET = "\033[0m"
+
+    def format(self, record: LogRecord) -> str:
+        # Color the level name
+        level_color = self.LEVEL_COLORS.get(record.levelname, "")
+        colored_level = f"{level_color}{record.levelname:8s}{self.RESET}"
+
+        # Format the message
+        msg = record.getMessage()
+
+        # Add extra fields if present
+        extra_parts: list[str] = []
+        for key, value in record.__dict__.items():
+            if key in (
+                "name",
+                "msg",
+                "args",
+                "levelname",
+                "levelno",
+                "pathname",
+                "filename",
+                "module",
+                "exc_info",
+                "exc_text",
+                "stack_info",
+                "lineno",
+                "funcName",
+                "created",
+                "msecs",
+                "relativeCreated",
+                "thread",
+                "threadName",
+                "processName",
+                "process",
+                "taskName",
+            ):
+                continue
+            extra_parts.append(f"{key}={value}")
+
+        # Build the final message
+        if extra_parts:
+            result = f"{colored_level} | {msg} | {' | '.join(extra_parts)}"
+        else:
+            result = f"{colored_level} | {msg}"
+
+        # Add exception if present
+        if record.exc_info:
+            result += "\n" + self.formatException(record.exc_info)
+
+        return result
+
+
 def configure_file_logger(
     log_path: Path | str = Path.cwd() / "gphotosmerger.log",
     console_output: bool = False,
@@ -68,6 +130,6 @@ def configure_file_logger(
 
         if console_output:
             console_handler = logging.StreamHandler()
-            console_handler.setFormatter(JSONFormatter())
+            console_handler.setFormatter(ConsoleFormatter())
             logger.addHandler(console_handler)
     return logger

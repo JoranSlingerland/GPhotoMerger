@@ -1,7 +1,7 @@
 """Argument validation for gphotosexport."""
+
 import argparse
 import sys
-from pathlib import Path
 
 
 def validate_args(args: argparse.Namespace) -> None:
@@ -37,11 +37,3 @@ def validate_args(args: argparse.Namespace) -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
-
-    # Validate metadata suffix
-    if not args.metadata_suffix or not args.metadata_suffix.startswith("."):
-        print(
-            f"Error: Metadata suffix must start with a dot: {args.metadata_suffix}",
-            file=sys.stderr,
-        )
-        sys.exit(1)

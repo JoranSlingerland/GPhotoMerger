@@ -24,7 +24,6 @@ def process_takeout(
     root_path: Path,
     export_dir: Path,
     logger: logging.Logger,
-    metadata_suffixes: list[str],
     supported_ext: set[str] = SUPPORTED_EXT,
 ) -> ProcessingStats:
     logger.info("Starting processing takeout root", extra={"root_path": str(root_path)})
@@ -54,7 +53,7 @@ def process_takeout(
     photos_failed = 0
 
     for photo_path in tqdm(photos, desc="Processing photos"):
-        json_file_path = find_json(photo_path, metadata_suffixes)
+        find_result = find_json(photo_path)
 
         # export_dir is required; copy photo to export_dir preserving relative path
         try:
@@ -66,23 +65,43 @@ def process_takeout(
         dest_photo.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(photo_path, dest_photo)
 
-        # Use the original supplemental JSON for metadata processing (do not copy it)
-        json_to_use = json_file_path
-
         target_photo_path = dest_photo
 
-        if not json_to_use:
+        if not find_result:
             logger.warning(
                 "No metadata file found for photo",
                 extra={"photo_path": str(target_photo_path)},
             )
             continue
 
-        metadata = load_metadata_from_file(json_to_use)
+        json_file_path, confidence, match_type = find_result
+
+        # Log the match with confidence level
+        if match_type in ("exact", "substring"):
+            logger.debug(
+                "Matched JSON file (exact match)",
+                extra={
+                    "photo_path": str(target_photo_path),
+                    "json_file": json_file_path.name,
+                    "match_type": match_type,
+                },
+            )
+        else:
+            logger.info(
+                "Matched JSON file (fuzzy match)",
+                extra={
+                    "photo_path": str(target_photo_path),
+                    "json_file": json_file_path.name,
+                    "match_type": match_type,
+                    "confidence": f"{confidence:.2%}",
+                },
+            )
+
+        metadata = load_metadata_from_file(json_file_path)
         if metadata is None:
             logger.warning(
                 "Failed to load metadata JSON",
-                extra={"json_file_path": str(json_to_use)},
+                extra={"json_file_path": str(json_file_path)},
             )
             continue
 
@@ -95,7 +114,7 @@ def process_takeout(
                 "Failed to write metadata",
                 extra={
                     "photo_path": str(target_photo_path),
-                    "json_file_path": str(json_to_use),
+                    "json_file_path": str(json_file_path),
                 },
             )
 

@@ -37,27 +37,84 @@ class Metadata(TypedDict, total=False):
     googlePhotosOrigin: GooglePhotosOrigin
 
 
-def find_json(photo_path: Path, metadata_suffixes: list[str]) -> Optional[Path]:
-    """Try to find metadata JSON file with multiple possible suffixes.
+def find_json(photo_path: Path) -> Optional[tuple[Path, float, str]]:
+    """Find metadata JSON file using fuzzy matching.
 
-    Also handles -edited suffix: if photo is named 'photo-edited.jpg',
-    tries both 'photo-edited.jpg' and 'photo.jpg' as base names.
+    Returns: (json_path, confidence_score, match_type) or None
+    - confidence_score: 1.0 for exact, 0.7-0.99 for fuzzy
+    - match_type: "exact", "substring", "fuzzy_prefix", or "fuzzy_ratio"
+
+    This approach is more robust than trying specific suffixes, since Google Takeout
+    uses various naming conventions:
+    - Standard: photo.jpg.supplemental-metadata.json
+    - Truncated: photo.json (stem + .json)
+    - Duplicates: photo.a.jpg → photo.json or photo..json
+    - Edited: photo-edited.jpg → photo.json
+
+    Strategy: Find all .json files in the same directory and match based on name similarity.
     """
-    # First try with the original filename
-    for suffix in metadata_suffixes:
-        json_path = photo_path.with_suffix(photo_path.suffix + suffix)
-        if json_path.exists():
-            return json_path
+    parent_dir = photo_path.parent
+    photo_stem = photo_path.stem
 
-    # If photo has -edited suffix, try without it
-    stem = photo_path.stem
-    if stem.endswith("-edited"):
-        base_stem = stem[:-7]  # Remove "-edited"
-        base_photo = photo_path.with_stem(base_stem)
-        for suffix in metadata_suffixes:
-            json_path = base_photo.with_suffix(base_photo.suffix + suffix)
-            if json_path.exists():
-                return json_path
+    # Normalize the stem by removing -edited suffix
+    if photo_stem.endswith("-edited"):
+        photo_stem = photo_stem[:-7]  # Remove "-edited"
+
+    # Get all JSON files in the same directory
+    json_files = list(parent_dir.glob("*.json"))
+
+    if not json_files:
+        return None
+
+    best_match: Optional[Path] = None
+    best_score: float = 0.0
+    best_match_type: str = ""
+
+    for json_file in json_files:
+        json_stem = json_file.stem
+
+        # Strategy 1: Exact match of stems
+        if photo_stem == json_stem:
+            return (json_file, 1.0, "exact")
+
+        # Strategy 2: JSON stem is a substring of photo stem (handles standard suffixes)
+        # e.g., "photo.jpg" stem vs "photo.jpg.supplemental-metadata" stem
+        if json_stem.startswith(photo_stem):
+            return (json_file, 1.0, "substring")
+
+        # Strategy 3: Photo stem starts with JSON stem (handles truncated files)
+        # e.g., "photo.a" stem vs "photo" stem
+        if photo_stem.startswith(json_stem):
+            # Score based on how much of the photo name is the json name
+            match_ratio = len(json_stem) / len(photo_stem)
+            if match_ratio > 0.6:  # At least 60% match
+                if match_ratio > best_score:
+                    best_match = json_file
+                    best_score = match_ratio
+                    best_match_type = "fuzzy_ratio"
+                if match_ratio > 0.85:  # Very confident match
+                    return (json_file, match_ratio, "fuzzy_ratio")
+            continue
+
+        # Strategy 4: Fuzzy match on common prefix (handles .a, .b duplicates)
+        # e.g., "photo.a" stem vs "photo." stem
+        # Find the longest common prefix
+        common_prefix_len = 0
+        for i in range(min(len(photo_stem), len(json_stem))):
+            if photo_stem[i] == json_stem[i]:
+                common_prefix_len = i + 1
+            else:
+                break
+
+        if common_prefix_len > 8:  # Min prefix length to be meaningful
+            similarity = common_prefix_len / max(len(photo_stem), len(json_stem))
+            if similarity > best_score:
+                best_match = json_file
+                best_score = similarity
+                best_match_type = "fuzzy_prefix"
+
+    if best_match is not None and best_score > 0.7:
+        return (best_match, best_score, best_match_type)
 
     return None
 

@@ -33,12 +33,6 @@ def _parse_args() -> argparse.Namespace:
         help="Path to JSON log file (default .\\gphotosmerger.log)",
     )
     parser.add_argument(
-        "--metadata-suffix",
-        type=str,
-        default=".supplemental-metadata.json,.supplemental-metadat",
-        help="Comma-separated list of metadata JSON file suffixes (default: .supplemental-metadata.json,.supplemental-metadat)",
-    )
-    parser.add_argument(
         "--console-log",
         action="store_true",
         help="Stream log output to console in addition to log file",
@@ -67,7 +61,6 @@ def main() -> None:
     print("=" * 60)
     print(f"Source:                      {args.source}")
     print(f"Export directory:            {args.export_dir}")
-    print(f"Metadata suffix:             {args.metadata_suffix}")
     print(f"Log file:                    {args.log_file}")
     print("=" * 60)
     print()
@@ -77,17 +70,13 @@ def main() -> None:
         extra={
             "source": str(args.source),
             "export_dir": str(args.export_dir),
-            "metadata_suffix": args.metadata_suffix,
             "log_file": str(args.log_file),
         },
     )
 
     args.export_dir.mkdir(parents=True, exist_ok=True)
 
-    metadata_suffixes = [s.strip() for s in args.metadata_suffix.split(",")]
-    stats = process_takeout(
-        args.source, args.export_dir, logger, metadata_suffixes=metadata_suffixes
-    )
+    stats = process_takeout(args.source, args.export_dir, logger)
 
     print()
     print("=" * 60)

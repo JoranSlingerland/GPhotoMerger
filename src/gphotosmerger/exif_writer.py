@@ -107,7 +107,7 @@ def _write_metadata_piexif(
             )
         has_desc = True
 
-    logger.info(
+    logger.debug(
         "Writing metadata (piexif)",
         extra={
             "photo_path": str(photo_path),
@@ -126,7 +126,7 @@ def _write_metadata_piexif(
     elif epoch_seconds is not None:
         os.utime(photo_path, (float(epoch_seconds), float(epoch_seconds)))
 
-    logger.info(
+    logger.debug(
         "Metadata written (piexif)",
         extra={"photo_path": str(photo_path)},
     )
@@ -176,7 +176,7 @@ def _write_metadata_exiftool(
 
     command_args.append(str(photo_path))
 
-    logger.info(
+    logger.debug(
         "Writing metadata (exiftool)",
         extra={
             "photo_path": str(photo_path),
@@ -202,7 +202,7 @@ def _write_metadata_exiftool(
         except Exception as ut_err:
             raise RuntimeError(f"Failed to set file mtime: {ut_err}") from ut_err
 
-    logger.info(
+    logger.debug(
         "Metadata written (exiftool)",
         extra={"photo_path": str(photo_path)},
     )
@@ -238,7 +238,7 @@ def _write_metadata_mutagen(
         mp4["\xa9cmt"] = desc
         has_desc = True
 
-    logger.info(
+    logger.debug(
         "Writing metadata (mutagen/MP4)",
         extra={
             "photo_path": str(photo_path),
@@ -255,7 +255,7 @@ def _write_metadata_mutagen(
     elif epoch_seconds is not None:
         os.utime(photo_path, (float(epoch_seconds), float(epoch_seconds)))
 
-    logger.info(
+    logger.debug(
         "Metadata written (mutagen/MP4)",
         extra={"photo_path": str(photo_path)},
     )
