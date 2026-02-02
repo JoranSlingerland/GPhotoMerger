@@ -1,5 +1,6 @@
 import logging
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import NamedTuple
 
@@ -20,13 +21,90 @@ class ProcessingStats(NamedTuple):
 SUPPORTED_EXT = {".jpg", ".jpeg", ".png", ".heic", ".mp4", ".mov", ".gif", ".bmp"}
 
 
+def _process_photo(
+    photo_path: Path,
+    root_path: Path,
+    export_dir: Path,
+    logger: logging.Logger,
+) -> tuple[bool, bool, str]:
+    """Process a single photo. Returns (success, has_metadata, error_msg)."""
+    find_result = find_json(photo_path)
+
+    # export_dir is required; copy photo to export_dir preserving relative path
+    try:
+        relative_path = photo_path.relative_to(root_path)
+    except Exception:
+        relative_path = Path(photo_path.name)
+
+    dest_photo = export_dir / relative_path
+    dest_photo.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(photo_path, dest_photo)
+
+    target_photo_path = dest_photo
+
+    if not find_result:
+        logger.warning(
+            "No metadata file found for photo",
+            extra={"photo_path": str(target_photo_path)},
+        )
+        return (True, False, "")
+
+    json_file_path, confidence, match_type = find_result
+
+    # Log the match with confidence level
+    if match_type in ("exact", "substring"):
+        logger.debug(
+            "Matched JSON file (exact match)",
+            extra={
+                "photo_path": str(target_photo_path),
+                "json_file": json_file_path.name,
+                "match_type": match_type,
+            },
+        )
+    else:
+        logger.info(
+            "Matched JSON file (fuzzy match)",
+            extra={
+                "photo_path": str(target_photo_path),
+                "json_file": json_file_path.name,
+                "match_type": match_type,
+                "confidence": f"{confidence:.2%}",
+            },
+        )
+
+    metadata = load_metadata_from_file(json_file_path)
+    if metadata is None:
+        logger.warning(
+            "Failed to load metadata JSON",
+            extra={"json_file_path": str(json_file_path)},
+        )
+        return (True, False, "")
+
+    try:
+        exif_write(target_photo_path, metadata)
+        return (True, True, "")
+    except Exception as e:
+        logger.exception(
+            "Failed to write metadata",
+            extra={
+                "photo_path": str(target_photo_path),
+                "json_file_path": str(json_file_path),
+            },
+        )
+        return (False, False, str(e))
+
+
 def process_takeout(
     root_path: Path,
     export_dir: Path,
     logger: logging.Logger,
     supported_ext: set[str] = SUPPORTED_EXT,
+    max_workers: int = 4,
 ) -> ProcessingStats:
-    logger.info("Starting processing takeout root", extra={"root_path": str(root_path)})
+    logger.info(
+        "Starting processing takeout root",
+        extra={"root_path": str(root_path), "max_workers": max_workers},
+    )
     all_files = list(root_path.rglob("*"))
     photos: list[Path] = []
     unsupported_files = 0
@@ -52,71 +130,28 @@ def process_takeout(
     photos_with_metadata = 0
     photos_failed = 0
 
-    for photo_path in tqdm(photos, desc="Processing photos"):
-        find_result = find_json(photo_path)
+    # Process photos in parallel using thread pool
+    # Limit to available photos if fewer than max_workers
+    actual_workers = min(max_workers, len(photos))
+    with ThreadPoolExecutor(max_workers=actual_workers) as executor:
+        futures = {
+            executor.submit(
+                _process_photo, photo_path, root_path, export_dir, logger
+            ): photo_path
+            for photo_path in photos
+        }
 
-        # export_dir is required; copy photo to export_dir preserving relative path
-        try:
-            relative_path = photo_path.relative_to(root_path)
-        except Exception:
-            relative_path = Path(photo_path.name)
-
-        dest_photo = export_dir / relative_path
-        dest_photo.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(photo_path, dest_photo)
-
-        target_photo_path = dest_photo
-
-        if not find_result:
-            logger.warning(
-                "No metadata file found for photo",
-                extra={"photo_path": str(target_photo_path)},
-            )
-            continue
-
-        json_file_path, confidence, match_type = find_result
-
-        # Log the match with confidence level
-        if match_type in ("exact", "substring"):
-            logger.debug(
-                "Matched JSON file (exact match)",
-                extra={
-                    "photo_path": str(target_photo_path),
-                    "json_file": json_file_path.name,
-                    "match_type": match_type,
-                },
-            )
-        else:
-            logger.info(
-                "Matched JSON file (fuzzy match)",
-                extra={
-                    "photo_path": str(target_photo_path),
-                    "json_file": json_file_path.name,
-                    "match_type": match_type,
-                    "confidence": f"{confidence:.2%}",
-                },
-            )
-
-        metadata = load_metadata_from_file(json_file_path)
-        if metadata is None:
-            logger.warning(
-                "Failed to load metadata JSON",
-                extra={"json_file_path": str(json_file_path)},
-            )
-            continue
-
-        try:
-            exif_write(target_photo_path, metadata)
-            photos_with_metadata += 1
-        except Exception:
-            photos_failed += 1
-            logger.exception(
-                "Failed to write metadata",
-                extra={
-                    "photo_path": str(target_photo_path),
-                    "json_file_path": str(json_file_path),
-                },
-            )
+        for future in tqdm(
+            as_completed(futures),
+            total=len(photos),
+            desc="Processing photos",
+        ):
+            success, has_metadata, _ = future.result()
+            if success:
+                if has_metadata:
+                    photos_with_metadata += 1
+            else:
+                photos_failed += 1
 
     logger.info(
         "Completed processing takeout root",

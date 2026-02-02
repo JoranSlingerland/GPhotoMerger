@@ -44,6 +44,12 @@ def _parse_args() -> argparse.Namespace:
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Set the logging level (default: INFO)",
     )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=4,
+        help="Number of parallel workers for processing (default: 4)",
+    )
     return parser.parse_args()
 
 
@@ -62,6 +68,7 @@ def main() -> None:
     print(f"Source:                      {args.source}")
     print(f"Export directory:            {args.export_dir}")
     print(f"Log file:                    {args.log_file}")
+    print(f"Max workers:                 {args.max_workers}")
     print("=" * 60)
     print()
 
@@ -71,12 +78,15 @@ def main() -> None:
             "source": str(args.source),
             "export_dir": str(args.export_dir),
             "log_file": str(args.log_file),
+            "max_workers": args.max_workers,
         },
     )
 
     args.export_dir.mkdir(parents=True, exist_ok=True)
 
-    stats = process_takeout(args.source, args.export_dir, logger)
+    stats = process_takeout(
+        args.source, args.export_dir, logger, max_workers=args.max_workers
+    )
 
     print()
     print("=" * 60)
