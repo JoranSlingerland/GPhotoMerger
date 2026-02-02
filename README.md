@@ -24,6 +24,8 @@ Options
 - `--source` / `-s`: Root path of your Google Takeout photos (required).
 - `--export-dir` / `-o`: Directory where photos and supplemental JSON will be copied before processing (required).
 - `--log-file` / `-l`: Path to the JSON log file (default `./gphotosmerger.log`).
+- `--console-log`: Stream log output to console in addition to log file.
+- `--log-level`: Set the logging level (default `INFO`).
 - `--max-workers`: Number of parallel workers for processing (default `4`).
 - `--move-files`: Move files instead of copying (faster, but removes originals).
 
