@@ -17,7 +17,7 @@ class ProcessingStats(NamedTuple):
     unsupported_files: int
 
 
-SUPPORTED_EXT = {".jpg", ".jpeg", ".png", ".heic", ".mp4"}
+SUPPORTED_EXT = {".jpg", ".jpeg", ".png", ".heic", ".mp4", ".mov", ".gif", ".bmp"}
 
 
 def process_takeout(
