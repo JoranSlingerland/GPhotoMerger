@@ -17,6 +17,7 @@ class ProcessingStats(NamedTuple):
     photos_failed: int
     unsupported_files: int
     photos_skipped: int
+    photos_filtered: int
 
 
 SUPPORTED_EXT = {".jpg", ".jpeg", ".png", ".heic", ".mp4", ".mov", ".gif", ".bmp"}
@@ -30,6 +31,8 @@ def _process_photo(
     move_files: bool,
     dry_run: bool = False,
     skip_existing: bool = False,
+    date_from: int | None = None,
+    date_to: int | None = None,
 ) -> tuple[bool, bool, str]:
     """Process a single photo. Returns (success, has_metadata, error_msg)."""
     find_result = find_json(photo_path)
@@ -106,6 +109,37 @@ def _process_photo(
         )
         return (True, False, "")
 
+    # Filter by date if specified
+    if date_from is not None or date_to is not None:
+        time_section = metadata.get("photoTakenTime")
+        if isinstance(time_section, dict):
+            ts = time_section.get("timestamp")
+            if ts:
+                try:
+                    photo_timestamp = int(ts)
+                    if date_from is not None and photo_timestamp < date_from:
+                        logger.debug(
+                            "Photo filtered (before date_from)",
+                            extra={
+                                "photo_path": str(target_photo_path),
+                                "photo_timestamp": photo_timestamp,
+                                "date_from": date_from,
+                            },
+                        )
+                        return (True, False, "filtered")
+                    if date_to is not None and photo_timestamp > date_to:
+                        logger.debug(
+                            "Photo filtered (after date_to)",
+                            extra={
+                                "photo_path": str(target_photo_path),
+                                "photo_timestamp": photo_timestamp,
+                                "date_to": date_to,
+                            },
+                        )
+                        return (True, False, "filtered")
+                except (ValueError, TypeError):
+                    pass  # If timestamp is invalid, don't filter
+
     if dry_run:
         logger.info(
             "DRY RUN: Would write metadata",
@@ -147,6 +181,8 @@ def process_takeout(
     move_files: bool = False,
     dry_run: bool = False,
     skip_existing: bool = False,
+    date_from: int | None = None,
+    date_to: int | None = None,
 ) -> ProcessingStats:
     logger.info(
         "Starting processing takeout root",
@@ -156,6 +192,8 @@ def process_takeout(
             "move_files": move_files,
             "dry_run": dry_run,
             "skip_existing": skip_existing,
+            "date_from": date_from,
+            "date_to": date_to,
         },
     )
     all_files = list(root_path.rglob("*"))
@@ -183,6 +221,7 @@ def process_takeout(
     photos_with_metadata = 0
     photos_failed = 0
     photos_skipped = 0
+    photos_filtered = 0
 
     # Process photos in parallel using thread pool
     if photos:
@@ -199,6 +238,8 @@ def process_takeout(
                     move_files,
                     dry_run,
                     skip_existing,
+                    date_from,
+                    date_to,
                 ): photo_path
                 for photo_path in photos
             }
@@ -211,6 +252,8 @@ def process_takeout(
                 success, has_metadata, error_msg = future.result()
                 if error_msg == "skipped":
                     photos_skipped += 1
+                elif error_msg == "filtered":
+                    photos_filtered += 1
                 elif success:
                     if has_metadata:
                         photos_with_metadata += 1
@@ -227,6 +270,7 @@ def process_takeout(
             "photos_failed": photos_failed,
             "unsupported_files": unsupported_files,
             "photos_skipped": photos_skipped,
+            "photos_filtered": photos_filtered,
         },
     )
 
@@ -237,4 +281,5 @@ def process_takeout(
         photos_failed=photos_failed,
         unsupported_files=unsupported_files,
         photos_skipped=photos_skipped,
+        photos_filtered=photos_filtered,
     )

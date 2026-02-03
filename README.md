@@ -31,6 +31,8 @@ Options
 - `--dry-run`: Preview operations without making any changes.
 - `--skip-existing`: Skip files that already exist in export directory (useful for resuming).
 - `--stats-file`: Export processing statistics to a JSON file.
+- `--date-from`: Filter photos from this date (ISO format: YYYY-MM-DD or epoch timestamp).
+- `--date-to`: Filter photos to this date (ISO format: YYYY-MM-DD or epoch timestamp).
 
 Notes
 
@@ -44,4 +46,5 @@ Tips for Large Libraries
 - Use `--dry-run` to preview what will be processed before committing changes.
 - Use `--skip-existing` to resume interrupted operations without reprocessing files.
 - Use `--stats-file` to export processing statistics for later analysis.
+- Use `--date-from` and `--date-to` to process only photos from a specific time period (e.g., `--date-from 2020-01-01 --date-to 2020-12-31`).
 - Adjust `--max-workers` based on your system's capabilities (more workers = faster processing).

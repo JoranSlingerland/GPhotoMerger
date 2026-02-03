@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import json
 import logging
 from pathlib import Path
@@ -71,12 +72,51 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         help="Export statistics to a JSON file",
     )
+    parser.add_argument(
+        "--date-from",
+        type=str,
+        help="Filter photos from this date (ISO format: YYYY-MM-DD or epoch timestamp)",
+    )
+    parser.add_argument(
+        "--date-to",
+        type=str,
+        help="Filter photos to this date (ISO format: YYYY-MM-DD or epoch timestamp)",
+    )
     return parser.parse_args()
+
+
+def _parse_date_filter(date_str: str | None) -> int | None:
+    """Parse date string to epoch timestamp or return None."""
+    if date_str is None:
+        return None
+
+    # Try parsing as epoch timestamp
+    try:
+        return int(date_str)
+    except ValueError:
+        pass
+
+    # Try parsing as ISO date (YYYY-MM-DD)
+    try:
+        dt = datetime.datetime.strptime(date_str, "%Y-%m-%d")
+        # Set to start of day UTC
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return int(dt.timestamp())
+    except ValueError:
+        pass
+
+    raise ValueError(
+        f"Invalid date format: {date_str}. Use ISO format (YYYY-MM-DD) or epoch timestamp."
+    )
 
 
 def main() -> None:
     args = _parse_args()
     validate_args(args)
+
+    # Parse date filters
+    date_from = _parse_date_filter(args.date_from)
+    date_to = _parse_date_filter(args.date_to)
 
     log_level = getattr(logging, args.log_level.upper())
     logger = configure_file_logger(
@@ -93,6 +133,10 @@ def main() -> None:
     print(f"Move files:                  {args.move_files}")
     print(f"Dry run:                     {args.dry_run}")
     print(f"Skip existing:               {args.skip_existing}")
+    if date_from:
+        print(f"Date from:                   {args.date_from} ({date_from})")
+    if date_to:
+        print(f"Date to:                     {args.date_to} ({date_to})")
     print("=" * 60)
     print()
 
@@ -106,6 +150,8 @@ def main() -> None:
             "move_files": args.move_files,
             "dry_run": args.dry_run,
             "skip_existing": args.skip_existing,
+            "date_from": date_from,
+            "date_to": date_to,
         },
     )
 
@@ -120,6 +166,8 @@ def main() -> None:
         move_files=args.move_files,
         dry_run=args.dry_run,
         skip_existing=args.skip_existing,
+        date_from=date_from,
+        date_to=date_to,
     )
 
     print()
@@ -131,6 +179,7 @@ def main() -> None:
     print(f"Unsupported files:           {stats.unsupported_files}")
     print(f"Photos with metadata:        {stats.photos_with_metadata}")
     print(f"Photos skipped:              {stats.photos_skipped}")
+    print(f"Photos filtered:             {stats.photos_filtered}")
     print(f"Photos failed:               {stats.photos_failed}")
     print("=" * 60)
 
@@ -142,6 +191,7 @@ def main() -> None:
             "unsupported_files": stats.unsupported_files,
             "photos_with_metadata": stats.photos_with_metadata,
             "photos_skipped": stats.photos_skipped,
+            "photos_filtered": stats.photos_filtered,
             "photos_failed": stats.photos_failed,
             "source": str(args.source),
             "export_dir": str(args.export_dir),
