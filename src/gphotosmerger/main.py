@@ -82,6 +82,11 @@ def _parse_args() -> argparse.Namespace:
         type=str,
         help="Filter photos to this date (ISO format: YYYY-MM-DD or epoch timestamp)",
     )
+    parser.add_argument(
+        "--file-types",
+        type=str,
+        help="Filter by file extensions (comma-separated, e.g., 'jpg,png,mp4')",
+    )
     return parser.parse_args()
 
 
@@ -118,6 +123,13 @@ def main() -> None:
     date_from = _parse_date_filter(args.date_from)
     date_to = _parse_date_filter(args.date_to)
 
+    # Parse file type filter
+    file_types = None
+    if args.file_types:
+        file_types = set(
+            f".{ext.strip().lower().lstrip('.')}" for ext in args.file_types.split(",")
+        )
+
     log_level = getattr(logging, args.log_level.upper())
     logger = configure_file_logger(
         args.log_file, console_output=args.console_log, log_level=log_level
@@ -137,6 +149,8 @@ def main() -> None:
         print(f"Date from:                   {args.date_from} ({date_from})")
     if date_to:
         print(f"Date to:                     {args.date_to} ({date_to})")
+    if file_types:
+        print(f"File types:                  {', '.join(sorted(file_types))}")
     print("=" * 60)
     print()
 
@@ -152,6 +166,7 @@ def main() -> None:
             "skip_existing": args.skip_existing,
             "date_from": date_from,
             "date_to": date_to,
+            "file_types": list(file_types) if file_types else None,
         },
     )
 
@@ -168,6 +183,7 @@ def main() -> None:
         skip_existing=args.skip_existing,
         date_from=date_from,
         date_to=date_to,
+        file_types=file_types,
     )
 
     print()

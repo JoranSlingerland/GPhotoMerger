@@ -183,6 +183,7 @@ def process_takeout(
     skip_existing: bool = False,
     date_from: int | None = None,
     date_to: int | None = None,
+    file_types: set[str] | None = None,
 ) -> ProcessingStats:
     logger.info(
         "Starting processing takeout root",
@@ -194,17 +195,22 @@ def process_takeout(
             "skip_existing": skip_existing,
             "date_from": date_from,
             "date_to": date_to,
+            "file_types": list(file_types) if file_types else None,
         },
     )
     all_files = list(root_path.rglob("*"))
     photos: list[Path] = []
     unsupported_files = 0
+
+    # If file_types is specified, use that instead of supported_ext
+    effective_ext = file_types if file_types else supported_ext
+
     for photo_path in all_files:
         if photo_path.is_dir():
             continue
         if photo_path.suffix.lower() == ".json":
             continue
-        if photo_path.suffix.lower() in supported_ext:
+        if photo_path.suffix.lower() in effective_ext:
             photos.append(photo_path)
         else:
             unsupported_files += 1
