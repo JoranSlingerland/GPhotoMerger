@@ -23,6 +23,58 @@ class ProcessingStats(NamedTuple):
 SUPPORTED_EXT = {".jpg", ".jpeg", ".png", ".heic", ".mp4", ".mov", ".gif", ".bmp"}
 
 
+def _should_filter_by_date(
+    photo_path: Path,
+    metadata: dict,
+    date_from: int | None,
+    date_to: int | None,
+    logger: logging.Logger,
+) -> bool:
+    """Check if photo should be filtered based on date range.
+    
+    Returns True if photo should be filtered (excluded), False otherwise.
+    """
+    if date_from is None and date_to is None:
+        return False
+    
+    time_section = metadata.get("photoTakenTime")
+    if not isinstance(time_section, dict):
+        return False
+    
+    ts = time_section.get("timestamp")
+    if not ts:
+        return False
+    
+    try:
+        photo_timestamp = int(ts)
+    except (ValueError, TypeError):
+        return False  # If timestamp is invalid, don't filter
+    
+    if date_from is not None and photo_timestamp < date_from:
+        logger.debug(
+            "Photo filtered (before date_from)",
+            extra={
+                "photo_path": str(photo_path),
+                "photo_timestamp": photo_timestamp,
+                "date_from": date_from,
+            },
+        )
+        return True
+    
+    if date_to is not None and photo_timestamp > date_to:
+        logger.debug(
+            "Photo filtered (after date_to)",
+            extra={
+                "photo_path": str(photo_path),
+                "photo_timestamp": photo_timestamp,
+                "date_to": date_to,
+            },
+        )
+        return True
+    
+    return False
+
+
 def _process_photo(
     photo_path: Path,
     root_path: Path,
@@ -41,35 +93,10 @@ def _process_photo(
     if find_result and (date_from is not None or date_to is not None):
         json_file_path, _, _ = find_result
         metadata = load_metadata_from_file(json_file_path)
-        if metadata:
-            time_section = metadata.get("photoTakenTime")
-            if isinstance(time_section, dict):
-                ts = time_section.get("timestamp")
-                if ts:
-                    try:
-                        photo_timestamp = int(ts)
-                        if date_from is not None and photo_timestamp < date_from:
-                            logger.debug(
-                                "Photo filtered (before date_from)",
-                                extra={
-                                    "photo_path": str(photo_path),
-                                    "photo_timestamp": photo_timestamp,
-                                    "date_from": date_from,
-                                },
-                            )
-                            return (True, False, "filtered")
-                        if date_to is not None and photo_timestamp > date_to:
-                            logger.debug(
-                                "Photo filtered (after date_to)",
-                                extra={
-                                    "photo_path": str(photo_path),
-                                    "photo_timestamp": photo_timestamp,
-                                    "date_to": date_to,
-                                },
-                            )
-                            return (True, False, "filtered")
-                    except (ValueError, TypeError):
-                        pass  # If timestamp is invalid, don't filter
+        if metadata and _should_filter_by_date(
+            photo_path, metadata, date_from, date_to, logger
+        ):
+            return (True, False, "filtered")
 
     # export_dir is required; copy photo to export_dir preserving relative path
     try:
