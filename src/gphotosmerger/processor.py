@@ -16,6 +16,8 @@ class ProcessingStats(NamedTuple):
     photos_with_metadata: int
     photos_failed: int
     unsupported_files: int
+    photos_skipped: int
+    photos_filtered: int
 
 
 SUPPORTED_EXT = {".jpg", ".jpeg", ".png", ".heic", ".mp4", ".mov", ".gif", ".bmp"}
@@ -27,9 +29,47 @@ def _process_photo(
     export_dir: Path,
     logger: logging.Logger,
     move_files: bool,
+    dry_run: bool = False,
+    skip_existing: bool = False,
+    date_from: int | None = None,
+    date_to: int | None = None,
 ) -> tuple[bool, bool, str]:
     """Process a single photo. Returns (success, has_metadata, error_msg)."""
     find_result = find_json(photo_path)
+
+    # If we have metadata, check date filter early to avoid unnecessary I/O
+    if find_result and (date_from is not None or date_to is not None):
+        json_file_path, _, _ = find_result
+        metadata = load_metadata_from_file(json_file_path)
+        if metadata:
+            time_section = metadata.get("photoTakenTime")
+            if isinstance(time_section, dict):
+                ts = time_section.get("timestamp")
+                if ts:
+                    try:
+                        photo_timestamp = int(ts)
+                        if date_from is not None and photo_timestamp < date_from:
+                            logger.debug(
+                                "Photo filtered (before date_from)",
+                                extra={
+                                    "photo_path": str(photo_path),
+                                    "photo_timestamp": photo_timestamp,
+                                    "date_from": date_from,
+                                },
+                            )
+                            return (True, False, "filtered")
+                        if date_to is not None and photo_timestamp > date_to:
+                            logger.debug(
+                                "Photo filtered (after date_to)",
+                                extra={
+                                    "photo_path": str(photo_path),
+                                    "photo_timestamp": photo_timestamp,
+                                    "date_to": date_to,
+                                },
+                            )
+                            return (True, False, "filtered")
+                    except (ValueError, TypeError):
+                        pass  # If timestamp is invalid, don't filter
 
     # export_dir is required; copy photo to export_dir preserving relative path
     try:
@@ -38,11 +78,30 @@ def _process_photo(
         relative_path = Path(photo_path.name)
 
     dest_photo = export_dir / relative_path
-    dest_photo.parent.mkdir(parents=True, exist_ok=True)
-    if move_files:
-        shutil.move(str(photo_path), str(dest_photo))
+
+    # Check if file already exists and skip if requested
+    if skip_existing and dest_photo.exists():
+        logger.debug(
+            "Skipping existing file",
+            extra={"photo_path": str(photo_path), "dest_photo": str(dest_photo)},
+        )
+        return (True, False, "skipped")
+
+    if dry_run:
+        logger.info(
+            "DRY RUN: Would copy/move photo",
+            extra={
+                "photo_path": str(photo_path),
+                "dest_photo": str(dest_photo),
+                "move_files": move_files,
+            },
+        )
     else:
-        shutil.copy2(photo_path, dest_photo)
+        dest_photo.parent.mkdir(parents=True, exist_ok=True)
+        if move_files:
+            shutil.move(str(photo_path), str(dest_photo))
+        else:
+            shutil.copy2(photo_path, dest_photo)
 
     target_photo_path = dest_photo
 
@@ -84,6 +143,16 @@ def _process_photo(
         )
         return (True, False, "")
 
+    if dry_run:
+        logger.info(
+            "DRY RUN: Would write metadata",
+            extra={
+                "photo_path": str(target_photo_path),
+                "json_file_path": str(json_file_path),
+            },
+        )
+        return (True, True, "")
+
     try:
         final_photo_path = write_metadata(target_photo_path, metadata)
         if final_photo_path != target_photo_path:
@@ -113,6 +182,11 @@ def process_takeout(
     supported_ext: set[str] = SUPPORTED_EXT,
     max_workers: int = 4,
     move_files: bool = False,
+    dry_run: bool = False,
+    skip_existing: bool = False,
+    date_from: int | None = None,
+    date_to: int | None = None,
+    file_types: set[str] | None = None,
 ) -> ProcessingStats:
     logger.info(
         "Starting processing takeout root",
@@ -120,17 +194,26 @@ def process_takeout(
             "root_path": str(root_path),
             "max_workers": max_workers,
             "move_files": move_files,
+            "dry_run": dry_run,
+            "skip_existing": skip_existing,
+            "date_from": date_from,
+            "date_to": date_to,
+            "file_types": list(file_types) if file_types else None,
         },
     )
     all_files = list(root_path.rglob("*"))
     photos: list[Path] = []
     unsupported_files = 0
+
+    # Use file_types filter if specified, otherwise use all supported extensions
+    extensions_to_process = file_types if file_types else supported_ext
+
     for photo_path in all_files:
         if photo_path.is_dir():
             continue
         if photo_path.suffix.lower() == ".json":
             continue
-        if photo_path.suffix.lower() in supported_ext:
+        if photo_path.suffix.lower() in extensions_to_process:
             photos.append(photo_path)
         else:
             unsupported_files += 1
@@ -146,6 +229,8 @@ def process_takeout(
 
     photos_with_metadata = 0
     photos_failed = 0
+    photos_skipped = 0
+    photos_filtered = 0
 
     # Process photos in parallel using thread pool
     if photos:
@@ -160,6 +245,10 @@ def process_takeout(
                     export_dir,
                     logger,
                     move_files,
+                    dry_run,
+                    skip_existing,
+                    date_from,
+                    date_to,
                 ): photo_path
                 for photo_path in photos
             }
@@ -169,8 +258,12 @@ def process_takeout(
                 total=len(photos),
                 desc="Processing photos",
             ):
-                success, has_metadata, _ = future.result()
-                if success:
+                success, has_metadata, error_msg = future.result()
+                if error_msg == "skipped":
+                    photos_skipped += 1
+                elif error_msg == "filtered":
+                    photos_filtered += 1
+                elif success:
                     if has_metadata:
                         photos_with_metadata += 1
                 else:
@@ -185,6 +278,8 @@ def process_takeout(
             "photos_with_metadata": photos_with_metadata,
             "photos_failed": photos_failed,
             "unsupported_files": unsupported_files,
+            "photos_skipped": photos_skipped,
+            "photos_filtered": photos_filtered,
         },
     )
 
@@ -194,4 +289,6 @@ def process_takeout(
         photos_with_metadata=photos_with_metadata,
         photos_failed=photos_failed,
         unsupported_files=unsupported_files,
+        photos_skipped=photos_skipped,
+        photos_filtered=photos_filtered,
     )

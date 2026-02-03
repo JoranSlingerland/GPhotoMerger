@@ -28,6 +28,12 @@ Options
 - `--log-level`: Set the logging level (default `INFO`).
 - `--max-workers`: Number of parallel workers for processing (default `4`).
 - `--move-files`: Move files instead of copying (faster, but removes originals).
+- `--dry-run`: Preview operations without making any changes.
+- `--skip-existing`: Skip files that already exist in export directory (useful for resuming).
+- `--stats-file`: Export processing statistics to a JSON file.
+- `--date-from`: Filter photos from this date (ISO format: YYYY-MM-DD or epoch timestamp).
+- `--date-to`: Filter photos to this date (ISO format: YYYY-MM-DD or epoch timestamp).
+- `--file-types`: Filter by file extensions (comma-separated, e.g., 'jpg,png,mp4').
 
 Notes
 
@@ -35,3 +41,44 @@ Notes
 - JPEG uses `piexif`, PNG uses `Pillow`, MP4/MOV uses `mutagen`, and HEIC uses `exiftool`.
 - BMP files are converted to PNG for metadata support; GIF metadata is not supported.
 - Ensure `exiftool` is installed and available on your PATH for HEIC and fallback cases.
+
+Tips for Large Libraries
+
+- Use `--dry-run` to preview what will be processed before committing changes.
+- Use `--skip-existing` to resume interrupted operations without reprocessing files.
+- Use `--stats-file` to export processing statistics for later analysis.
+- Use `--date-from` and `--date-to` to process only photos from a specific time period (e.g., `--date-from 2020-01-01 --date-to 2020-12-31`).
+- Use `--file-types` to process only specific file formats (e.g., `--file-types jpg,png` for images only).
+- Adjust `--max-workers` based on your system's capabilities (more workers = faster processing).
+
+Example Usage Patterns
+
+**Preview what will be processed (dry-run):**
+```bash
+gphotosmerger --source ./Takeout --export-dir ./output --dry-run
+```
+
+**Process only photos from 2022:**
+```bash
+gphotosmerger --source ./Takeout --export-dir ./output --date-from 2022-01-01 --date-to 2022-12-31
+```
+
+**Process only videos:**
+```bash
+gphotosmerger --source ./Takeout --export-dir ./output --file-types mp4,mov
+```
+
+**Resume interrupted processing:**
+```bash
+gphotosmerger --source ./Takeout --export-dir ./output --skip-existing
+```
+
+**Export statistics for analysis:**
+```bash
+gphotosmerger --source ./Takeout --export-dir ./output --stats-file stats.json
+```
+
+**Fast processing with move instead of copy:**
+```bash
+gphotosmerger --source ./Takeout --export-dir ./output --move-files --max-workers 8
+```
