@@ -37,6 +37,40 @@ def _process_photo(
     """Process a single photo. Returns (success, has_metadata, error_msg)."""
     find_result = find_json(photo_path)
 
+    # If we have metadata, check date filter early to avoid unnecessary I/O
+    if find_result and (date_from is not None or date_to is not None):
+        json_file_path, _, _ = find_result
+        metadata = load_metadata_from_file(json_file_path)
+        if metadata:
+            time_section = metadata.get("photoTakenTime")
+            if isinstance(time_section, dict):
+                ts = time_section.get("timestamp")
+                if ts:
+                    try:
+                        photo_timestamp = int(ts)
+                        if date_from is not None and photo_timestamp < date_from:
+                            logger.debug(
+                                "Photo filtered (before date_from)",
+                                extra={
+                                    "photo_path": str(photo_path),
+                                    "photo_timestamp": photo_timestamp,
+                                    "date_from": date_from,
+                                },
+                            )
+                            return (True, False, "filtered")
+                        if date_to is not None and photo_timestamp > date_to:
+                            logger.debug(
+                                "Photo filtered (after date_to)",
+                                extra={
+                                    "photo_path": str(photo_path),
+                                    "photo_timestamp": photo_timestamp,
+                                    "date_to": date_to,
+                                },
+                            )
+                            return (True, False, "filtered")
+                    except (ValueError, TypeError):
+                        pass  # If timestamp is invalid, don't filter
+
     # export_dir is required; copy photo to export_dir preserving relative path
     try:
         relative_path = photo_path.relative_to(root_path)
@@ -46,7 +80,7 @@ def _process_photo(
     dest_photo = export_dir / relative_path
 
     # Check if file already exists and skip if requested
-    if skip_existing and dest_photo.exists() and not dry_run:
+    if skip_existing and dest_photo.exists():
         logger.debug(
             "Skipping existing file",
             extra={"photo_path": str(photo_path), "dest_photo": str(dest_photo)},
@@ -108,37 +142,6 @@ def _process_photo(
             extra={"json_file_path": str(json_file_path)},
         )
         return (True, False, "")
-
-    # Filter by date if specified
-    if date_from is not None or date_to is not None:
-        time_section = metadata.get("photoTakenTime")
-        if isinstance(time_section, dict):
-            ts = time_section.get("timestamp")
-            if ts:
-                try:
-                    photo_timestamp = int(ts)
-                    if date_from is not None and photo_timestamp < date_from:
-                        logger.debug(
-                            "Photo filtered (before date_from)",
-                            extra={
-                                "photo_path": str(target_photo_path),
-                                "photo_timestamp": photo_timestamp,
-                                "date_from": date_from,
-                            },
-                        )
-                        return (True, False, "filtered")
-                    if date_to is not None and photo_timestamp > date_to:
-                        logger.debug(
-                            "Photo filtered (after date_to)",
-                            extra={
-                                "photo_path": str(target_photo_path),
-                                "photo_timestamp": photo_timestamp,
-                                "date_to": date_to,
-                            },
-                        )
-                        return (True, False, "filtered")
-                except (ValueError, TypeError):
-                    pass  # If timestamp is invalid, don't filter
 
     if dry_run:
         logger.info(
@@ -202,15 +205,15 @@ def process_takeout(
     photos: list[Path] = []
     unsupported_files = 0
 
-    # If file_types is specified, use that instead of supported_ext
-    effective_ext = file_types if file_types else supported_ext
+    # Use file_types filter if specified, otherwise use all supported extensions
+    extensions_to_process = file_types if file_types else supported_ext
 
     for photo_path in all_files:
         if photo_path.is_dir():
             continue
         if photo_path.suffix.lower() == ".json":
             continue
-        if photo_path.suffix.lower() in effective_ext:
+        if photo_path.suffix.lower() in extensions_to_process:
             photos.append(photo_path)
         else:
             unsupported_files += 1

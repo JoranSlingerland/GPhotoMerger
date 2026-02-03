@@ -124,6 +124,8 @@ def main() -> None:
     date_to = _parse_date_filter(args.date_to)
 
     # Parse file type filter
+    # Normalize extensions: strip whitespace, lowercase, ensure leading dot
+    # Examples: "jpg", ".jpg", " JPG " all become ".jpg"
     file_types = None
     if args.file_types:
         file_types = set(
