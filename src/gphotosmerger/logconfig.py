@@ -11,7 +11,7 @@ class JSONFormatter(logging.Formatter):
     def format(self, record: LogRecord) -> str:
         payload = {
             "timestamp": datetime.datetime.fromtimestamp(
-                record.created, tz=datetime.timezone.utc
+                record.created, tz=datetime.UTC
             ).isoformat(),
             "level": record.levelname,
             "logger": record.name,
@@ -117,10 +117,12 @@ class ConsoleFormatter(logging.Formatter):
 
 
 def configure_file_logger(
-    log_path: Path | str = Path.cwd() / "gphotosmerger.log",
+    log_path: Path | str | None = None,
     console_output: bool = False,
     log_level: int = logging.INFO,
 ) -> logging.Logger:
+    if log_path is None:
+        log_path = Path.cwd() / "gphotosmerger.log"
     logger = logging.getLogger("gphotosmerger")
     if not logger.handlers:
         logger.setLevel(log_level)

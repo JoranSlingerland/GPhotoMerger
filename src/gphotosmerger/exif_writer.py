@@ -6,7 +6,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import piexif  # type: ignore[import-untyped]
 from mutagen.mp4 import MP4  # type: ignore[import-untyped]
@@ -21,19 +21,20 @@ def ensure_exiftool() -> str:
     exe = shutil.which("exiftool")
     if exe is None:
         raise FileNotFoundError(
-            "exiftool not found in PATH; please install exiftool and ensure it's on PATH"
+            "exiftool not found in PATH; "
+            "please install exiftool and ensure it's on PATH"
         )
     return exe
 
 
-def format_timestamp_for_exif(timestamp_str: str) -> Optional[tuple[str, int]]:
+def format_timestamp_for_exif(timestamp_str: str) -> tuple[str, int] | None:
     """Convert epoch-seconds string to exif datetime string and epoch int.
 
     Returns (exif_formatted_str, epoch_seconds) or None on failure.
     """
     try:
         epoch_seconds = int(timestamp_str)
-        dt = datetime.datetime.fromtimestamp(epoch_seconds, tz=datetime.timezone.utc)
+        dt = datetime.datetime.fromtimestamp(epoch_seconds, tz=datetime.UTC)
         exif_dt = dt.strftime("%Y:%m:%d %H:%M:%S")
         return exif_dt, epoch_seconds
     except (ValueError, OSError, OverflowError):
@@ -88,7 +89,7 @@ def _write_metadata_piexif(
         exif_dict = _empty_exif_dict()
 
     # date/time
-    epoch_seconds: Optional[int] = None
+    epoch_seconds: int | None = None
     has_time = False
     time_section = metadata.get("photoTakenTime")
     if isinstance(time_section, dict):
@@ -177,7 +178,7 @@ def _write_metadata_png(
     exif_dict = _empty_exif_dict()
 
     # date/time
-    epoch_seconds: Optional[int] = None
+    epoch_seconds: int | None = None
     has_time = False
     time_section = metadata.get("photoTakenTime")
     if isinstance(time_section, dict):
@@ -261,7 +262,7 @@ def _write_metadata_exiftool(
     command_args = [exiftool_exe, "-m", "-overwrite_original"]
 
     # date/time
-    epoch_seconds: Optional[int] = None
+    epoch_seconds: int | None = None
     has_time = False
     time_section = metadata.get("photoTakenTime")
     if isinstance(time_section, dict):
@@ -356,7 +357,7 @@ def _write_metadata_mutagen(
     mp4 = cast(Any, MP4(str(photo_path)))
 
     # date/time
-    epoch_seconds: Optional[int] = None
+    epoch_seconds: int | None = None
     has_time = False
     time_section = metadata.get("photoTakenTime")
     if isinstance(time_section, dict):
