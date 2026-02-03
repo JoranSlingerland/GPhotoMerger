@@ -50,3 +50,35 @@ Tips for Large Libraries
 - Use `--date-from` and `--date-to` to process only photos from a specific time period (e.g., `--date-from 2020-01-01 --date-to 2020-12-31`).
 - Use `--file-types` to process only specific file formats (e.g., `--file-types jpg,png` for images only).
 - Adjust `--max-workers` based on your system's capabilities (more workers = faster processing).
+
+Example Usage Patterns
+
+**Preview what will be processed (dry-run):**
+```bash
+gphotosmerger --source ./Takeout --export-dir ./output --dry-run
+```
+
+**Process only photos from 2022:**
+```bash
+gphotosmerger --source ./Takeout --export-dir ./output --date-from 2022-01-01 --date-to 2022-12-31
+```
+
+**Process only videos:**
+```bash
+gphotosmerger --source ./Takeout --export-dir ./output --file-types mp4,mov
+```
+
+**Resume interrupted processing:**
+```bash
+gphotosmerger --source ./Takeout --export-dir ./output --skip-existing
+```
+
+**Export statistics for analysis:**
+```bash
+gphotosmerger --source ./Takeout --export-dir ./output --stats-file stats.json
+```
+
+**Fast processing with move instead of copy:**
+```bash
+gphotosmerger --source ./Takeout --export-dir ./output --move-files --max-workers 8
+```
