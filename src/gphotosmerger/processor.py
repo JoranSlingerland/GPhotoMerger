@@ -16,6 +16,7 @@ class ProcessingStats(NamedTuple):
     photos_with_metadata: int
     photos_failed: int
     unsupported_files: int
+    photos_skipped: int
 
 
 SUPPORTED_EXT = {".jpg", ".jpeg", ".png", ".heic", ".mp4", ".mov", ".gif", ".bmp"}
@@ -27,6 +28,8 @@ def _process_photo(
     export_dir: Path,
     logger: logging.Logger,
     move_files: bool,
+    dry_run: bool = False,
+    skip_existing: bool = False,
 ) -> tuple[bool, bool, str]:
     """Process a single photo. Returns (success, has_metadata, error_msg)."""
     find_result = find_json(photo_path)
@@ -38,11 +41,30 @@ def _process_photo(
         relative_path = Path(photo_path.name)
 
     dest_photo = export_dir / relative_path
-    dest_photo.parent.mkdir(parents=True, exist_ok=True)
-    if move_files:
-        shutil.move(str(photo_path), str(dest_photo))
+
+    # Check if file already exists and skip if requested
+    if skip_existing and dest_photo.exists() and not dry_run:
+        logger.debug(
+            "Skipping existing file",
+            extra={"photo_path": str(photo_path), "dest_photo": str(dest_photo)},
+        )
+        return (True, False, "skipped")
+
+    if dry_run:
+        logger.info(
+            "DRY RUN: Would copy/move photo",
+            extra={
+                "photo_path": str(photo_path),
+                "dest_photo": str(dest_photo),
+                "move_files": move_files,
+            },
+        )
     else:
-        shutil.copy2(photo_path, dest_photo)
+        dest_photo.parent.mkdir(parents=True, exist_ok=True)
+        if move_files:
+            shutil.move(str(photo_path), str(dest_photo))
+        else:
+            shutil.copy2(photo_path, dest_photo)
 
     target_photo_path = dest_photo
 
@@ -84,6 +106,16 @@ def _process_photo(
         )
         return (True, False, "")
 
+    if dry_run:
+        logger.info(
+            "DRY RUN: Would write metadata",
+            extra={
+                "photo_path": str(target_photo_path),
+                "json_file_path": str(json_file_path),
+            },
+        )
+        return (True, True, "")
+
     try:
         final_photo_path = write_metadata(target_photo_path, metadata)
         if final_photo_path != target_photo_path:
@@ -113,6 +145,8 @@ def process_takeout(
     supported_ext: set[str] = SUPPORTED_EXT,
     max_workers: int = 4,
     move_files: bool = False,
+    dry_run: bool = False,
+    skip_existing: bool = False,
 ) -> ProcessingStats:
     logger.info(
         "Starting processing takeout root",
@@ -120,6 +154,8 @@ def process_takeout(
             "root_path": str(root_path),
             "max_workers": max_workers,
             "move_files": move_files,
+            "dry_run": dry_run,
+            "skip_existing": skip_existing,
         },
     )
     all_files = list(root_path.rglob("*"))
@@ -146,6 +182,7 @@ def process_takeout(
 
     photos_with_metadata = 0
     photos_failed = 0
+    photos_skipped = 0
 
     # Process photos in parallel using thread pool
     if photos:
@@ -160,6 +197,8 @@ def process_takeout(
                     export_dir,
                     logger,
                     move_files,
+                    dry_run,
+                    skip_existing,
                 ): photo_path
                 for photo_path in photos
             }
@@ -169,8 +208,10 @@ def process_takeout(
                 total=len(photos),
                 desc="Processing photos",
             ):
-                success, has_metadata, _ = future.result()
-                if success:
+                success, has_metadata, error_msg = future.result()
+                if error_msg == "skipped":
+                    photos_skipped += 1
+                elif success:
                     if has_metadata:
                         photos_with_metadata += 1
                 else:
@@ -185,6 +226,7 @@ def process_takeout(
             "photos_with_metadata": photos_with_metadata,
             "photos_failed": photos_failed,
             "unsupported_files": unsupported_files,
+            "photos_skipped": photos_skipped,
         },
     )
 
@@ -194,4 +236,5 @@ def process_takeout(
         photos_with_metadata=photos_with_metadata,
         photos_failed=photos_failed,
         unsupported_files=unsupported_files,
+        photos_skipped=photos_skipped,
     )

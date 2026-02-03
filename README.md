@@ -28,6 +28,9 @@ Options
 - `--log-level`: Set the logging level (default `INFO`).
 - `--max-workers`: Number of parallel workers for processing (default `4`).
 - `--move-files`: Move files instead of copying (faster, but removes originals).
+- `--dry-run`: Preview operations without making any changes.
+- `--skip-existing`: Skip files that already exist in export directory (useful for resuming).
+- `--stats-file`: Export processing statistics to a JSON file.
 
 Notes
 
@@ -35,3 +38,10 @@ Notes
 - JPEG uses `piexif`, PNG uses `Pillow`, MP4/MOV uses `mutagen`, and HEIC uses `exiftool`.
 - BMP files are converted to PNG for metadata support; GIF metadata is not supported.
 - Ensure `exiftool` is installed and available on your PATH for HEIC and fallback cases.
+
+Tips for Large Libraries
+
+- Use `--dry-run` to preview what will be processed before committing changes.
+- Use `--skip-existing` to resume interrupted operations without reprocessing files.
+- Use `--stats-file` to export processing statistics for later analysis.
+- Adjust `--max-workers` based on your system's capabilities (more workers = faster processing).

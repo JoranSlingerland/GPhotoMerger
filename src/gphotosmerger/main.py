@@ -1,4 +1,5 @@
 import argparse
+import json
 import logging
 from pathlib import Path
 
@@ -55,6 +56,21 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Move files instead of copying (faster, but removes originals)",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview operations without making any changes",
+    )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip files that already exist in export directory",
+    )
+    parser.add_argument(
+        "--stats-file",
+        type=Path,
+        help="Export statistics to a JSON file",
+    )
     return parser.parse_args()
 
 
@@ -75,6 +91,8 @@ def main() -> None:
     print(f"Log file:                    {args.log_file}")
     print(f"Max workers:                 {args.max_workers}")
     print(f"Move files:                  {args.move_files}")
+    print(f"Dry run:                     {args.dry_run}")
+    print(f"Skip existing:               {args.skip_existing}")
     print("=" * 60)
     print()
 
@@ -86,10 +104,13 @@ def main() -> None:
             "log_file": str(args.log_file),
             "max_workers": args.max_workers,
             "move_files": args.move_files,
+            "dry_run": args.dry_run,
+            "skip_existing": args.skip_existing,
         },
     )
 
-    args.export_dir.mkdir(parents=True, exist_ok=True)
+    if not args.dry_run:
+        args.export_dir.mkdir(parents=True, exist_ok=True)
 
     stats = process_takeout(
         args.source,
@@ -97,6 +118,8 @@ def main() -> None:
         logger,
         max_workers=args.max_workers,
         move_files=args.move_files,
+        dry_run=args.dry_run,
+        skip_existing=args.skip_existing,
     )
 
     print()
@@ -107,8 +130,27 @@ def main() -> None:
     print(f"Photos processed:            {stats.photos_processed}")
     print(f"Unsupported files:           {stats.unsupported_files}")
     print(f"Photos with metadata:        {stats.photos_with_metadata}")
+    print(f"Photos skipped:              {stats.photos_skipped}")
     print(f"Photos failed:               {stats.photos_failed}")
     print("=" * 60)
+
+    # Export statistics if requested
+    if args.stats_file:
+        stats_data = {
+            "total_files": stats.total_files,
+            "photos_processed": stats.photos_processed,
+            "unsupported_files": stats.unsupported_files,
+            "photos_with_metadata": stats.photos_with_metadata,
+            "photos_skipped": stats.photos_skipped,
+            "photos_failed": stats.photos_failed,
+            "source": str(args.source),
+            "export_dir": str(args.export_dir),
+            "dry_run": args.dry_run,
+            "skip_existing": args.skip_existing,
+        }
+        with open(args.stats_file, "w", encoding="utf-8") as f:
+            json.dump(stats_data, f, indent=2)
+        print(f"\nStatistics exported to: {args.stats_file}")
 
 
 if __name__ == "__main__":
