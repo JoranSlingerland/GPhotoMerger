@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Optional, TypedDict, cast
+from typing import TypedDict, cast
 
 
 class TimeDict(TypedDict, total=False):
@@ -37,7 +37,7 @@ class Metadata(TypedDict, total=False):
     googlePhotosOrigin: GooglePhotosOrigin
 
 
-def find_json(photo_path: Path) -> Optional[tuple[Path, float, str]]:
+def find_json(photo_path: Path) -> tuple[Path, float, str] | None:
     """Find metadata JSON file using fuzzy matching.
 
     Returns: (json_path, confidence_score, match_type) or None
@@ -49,11 +49,12 @@ def find_json(photo_path: Path) -> Optional[tuple[Path, float, str]]:
     - Standard: photo.jpg.supplemental-metadata.json
     - Truncated: photo.json (stem + .json)
     - Duplicates: photo.a.jpg → photo.json or photo..json
-    - Duplicates with suffix: photo(1).jpg → photo(1).json or photo.jpg.supplemental-metadata(1).json
+    - Duplicates with suffix: photo(1).jpg → photo(1).json
+      or photo.jpg.supplemental-metadata(1).json
     - Edited: photo-edited.jpg → photo.json
 
-    Strategy: Find all .json files in the same directory and match based on name similarity.
-    Prioritize files with matching duplicate suffixes.
+    Strategy: Find all .json files in the same directory and match
+    based on name similarity. Prioritize files with matching duplicate suffixes.
     """
     import re
 
@@ -78,7 +79,7 @@ def find_json(photo_path: Path) -> Optional[tuple[Path, float, str]]:
     if not json_files:
         return None
 
-    best_match: Optional[Path] = None
+    best_match: Path | None = None
     best_score: float = 0.0
     best_match_type: str = ""
 
@@ -183,7 +184,7 @@ def find_json(photo_path: Path) -> Optional[tuple[Path, float, str]]:
     return None
 
 
-def load_metadata_from_file(json_path: Path) -> Optional[Metadata]:
+def load_metadata_from_file(json_path: Path) -> Metadata | None:
     """Load and return metadata as a Metadata TypedDict or None if load fails."""
     try:
         with open(json_path, encoding="utf-8") as fh:

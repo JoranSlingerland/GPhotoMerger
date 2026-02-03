@@ -35,3 +35,20 @@ Notes
 - JPEG uses `piexif`, PNG uses `Pillow`, MP4/MOV uses `mutagen`, and HEIC uses `exiftool`.
 - BMP files are converted to PNG for metadata support; GIF metadata is not supported.
 - Ensure `exiftool` is installed and available on your PATH for HEIC and fallback cases.
+
+Development
+-----------
+
+Install development dependencies:
+
+```bash
+pip install -e ".[dev]"
+```
+
+Run linting with ruff:
+
+```bash
+ruff check src/
+ruff format src/
+```
+
